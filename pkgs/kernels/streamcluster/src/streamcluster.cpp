@@ -1667,7 +1667,12 @@ void copycenters(Points *points, Points* centers, long* centerIDs, long offset)
     if ( is_a_median[i] ) {
       memcpy( centers->p[k].coord, points->p[i].coord, points->dim * sizeof(float));
       centers->p[k].weight = points->p[i].weight;
+#ifdef RELAYOUT_ALLOC
+      long ** newcenterIDs = (long **) centerIDs;
+      *newcenterIDs[k] = i + offset;
+#else
       centerIDs[k] = i + offset;
+#endif
       k++;
     }
   }
@@ -1764,7 +1769,12 @@ public:
     size_t count = 0;
     for( int i = 0; i < num && n > 0; i++ ) {
       for( int k = 0; k < dim; k++ ) {
+#ifdef RELAYOUT_ALLOC
+  float ** newdest = (float **) dest;
+  *newdest[i*dim + k] = lrand48()/(float)INT_MAX;
+#else
 	dest[i*dim + k] = lrand48()/(float)INT_MAX;
+#endif
       }
       n--;
       count++;
@@ -1793,7 +1803,16 @@ public:
     }
   }
   size_t read( float* dest, int dim, int num ) {
+#ifdef RELAYOUT_ALLOC
+    for( int i = 0; i < num; i++ ) {
+      for( int k = 0; k < dim; k++ ) {
+      float ** newdest = (float **) dest;
+      std::fread(newdest[i*dim + k], sizeof(float), 1, fp);
+      }
+    }
+#else
     return std::fread(dest, sizeof(float)*dim, num, fp); 
+#endif
   }
   int ferror() {
     return std::ferror(fp);
@@ -1822,7 +1841,12 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
 
   for( int i = 0; i < centers->num; i++ ) {
     if( is_a_median[i] ) {
+#ifdef RELAYOUT_ALLOC
+      long ** newcenterIDs = (long **) centerIDs;
+      fprintf(fp, "%u\n", *newcenterIDs[i]);
+#else
       fprintf(fp, "%u\n", centerIDs[i]);
+#endif
       fprintf(fp, "%lf\n", centers->p[i].weight);
       for( int k = 0; k < centers->dim; k++ ) {
 	fprintf(fp, "%lf ", centers->p[i].coord[k]);
@@ -1833,11 +1857,36 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
   fclose(fp);
 }
 
+#ifdef RELAYOUT_ALLOC
+// Malloc an array of pointers and the corresponding objects
+static void ** batch_alloc(int num, int item_size)
+{
+  void ** batch = calloc(num, sizeof(void *));
+  if (bash == NULL) {
+    fprintf(stderr, "not enough memory for pointers array(len=%d)!\n", num);
+    exit(1);
+  }
+  for (int i = 0; i < num; i++) {
+    batch[i] = malloc(item_size);
+    if (batch[i] == NULL) {
+      fprintf(stderr, "not enough memory for allocating object(size=%d)!\n", item_size);
+      exit(1);
+    }
+  }
+  return batch;
+}
+#endif
+
 void streamCluster( PStream* stream, 
 		    long kmin, long kmax, int dim,
 		    long chunksize, long centersize, char* outfile )
 {
 
+#ifdef RELAYOUT_ALLOC
+  float** block = (float**)batch_alloc(chunksize*dim, sizeof(float));
+  float** centerBlock = (float**)batch_alloc(centersize*dim, sizeof(float));
+  long** centerIDs = (long**)batch_alloc(centersize*dim, sizeof(long));
+#else
 #ifdef TBB_VERSION
   float* block = (float*)memoryFloat.allocate( chunksize*dim*sizeof(float) );
   float* centerBlock = (float*)memoryFloat.allocate(centersize*dim*sizeof(float) );
@@ -1847,6 +1896,7 @@ void streamCluster( PStream* stream,
   float* centerBlock = (float*)malloc(centersize*dim*sizeof(float) );
   long* centerIDs = (long*)malloc(centersize*dim*sizeof(long));
 #endif
+#endif // RELAYOUT_ALLOC
 
   if( block == NULL ) { 
     fprintf(stderr,"not enough memory for a chunk!\n");
@@ -1864,7 +1914,11 @@ void streamCluster( PStream* stream,
 #endif
 
   for( int i = 0; i < chunksize; i++ ) {
+#ifdef RELAYOUT_ALLOC
+    points.p[i].coord = block[i*dim];
+#else
     points.p[i].coord = &block[i*dim];
+#endif
   }
 
   Points centers;
@@ -1878,7 +1932,11 @@ void streamCluster( PStream* stream,
   centers.num = 0;
 
   for( int i = 0; i< centersize; i++ ) {
+#ifdef RELAYOUT_ALLOC
+    centers.p[i].coord = centerBlock[i*dim];
+#else
     centers.p[i].coord = &centerBlock[i*dim];
+#endif
     centers.p[i].weight = 1.0;
   }
 
