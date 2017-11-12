@@ -36,6 +36,8 @@ using namespace tbb;
 #include <hooks.h>
 #endif
 
+#define RELAYOUT_ALLOC 1
+
 using namespace std;
 
 #define MAXNAMESIZE 1024 // max filename length
@@ -1861,8 +1863,8 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
 // Malloc an array of pointers and the corresponding objects
 static void ** batch_alloc(int num, int item_size)
 {
-  void ** batch = calloc(num, sizeof(void *));
-  if (bash == NULL) {
+  void ** batch = (void **) calloc(num, sizeof(void *));
+  if (batch == NULL) {
     fprintf(stderr, "not enough memory for pointers array(len=%d)!\n", num);
     exit(1);
   }
@@ -1944,7 +1946,7 @@ void streamCluster( PStream* stream,
   long kfinal;
   while(1) {
 
-    size_t numRead  = stream->read(block, dim, chunksize ); 
+    size_t numRead  = stream->read((float *)block, dim, chunksize ); 
     fprintf(stderr,"read %d points\n",numRead);
 
     if( stream->ferror() || numRead < (unsigned int)chunksize && !stream->feof() ) {
@@ -1981,7 +1983,7 @@ void streamCluster( PStream* stream,
       exit(1);
     }
 
-    copycenters(&points, &centers, centerIDs, IDoffset); /* sequential */
+    copycenters(&points, &centers, (long *)centerIDs, IDoffset); /* sequential */
     IDoffset += numRead;
 
 #ifdef TBB_VERSION
@@ -2012,7 +2014,7 @@ void streamCluster( PStream* stream,
 
   localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
   contcenters(&centers);
-  outcenterIDs( &centers, centerIDs, outfile);
+  outcenterIDs( &centers, (long *)centerIDs, outfile);
 }
 
 int main(int argc, char **argv)
