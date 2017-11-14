@@ -36,8 +36,6 @@ using namespace tbb;
 #include <hooks.h>
 #endif
 
-#define RELAYOUT_ALLOC 1
-
 using namespace std;
 
 #define MAXNAMESIZE 1024 // max filename length
@@ -1669,12 +1667,7 @@ void copycenters(Points *points, Points* centers, long* centerIDs, long offset)
     if ( is_a_median[i] ) {
       memcpy( centers->p[k].coord, points->p[i].coord, points->dim * sizeof(float));
       centers->p[k].weight = points->p[i].weight;
-#ifdef RELAYOUT_ALLOC
-      long ** newcenterIDs = (long **) centerIDs;
-      *newcenterIDs[k] = i + offset;
-#else
       centerIDs[k] = i + offset;
-#endif
       k++;
     }
   }
@@ -1769,18 +1762,24 @@ public:
   }
   size_t read( float* dest, int dim, int num ) {
     size_t count = 0;
+#ifdef RELAYOUT_ALLOC
+    float ** newdest = (float **) dest;
     for( int i = 0; i < num && n > 0; i++ ) {
       for( int k = 0; k < dim; k++ ) {
-#ifdef RELAYOUT_ALLOC
-  float ** newdest = (float **) dest;
-  *newdest[i*dim + k] = lrand48()/(float)INT_MAX;
-#else
-	dest[i*dim + k] = lrand48()/(float)INT_MAX;
-#endif
+        newdest[i][k] = lrand48()/(float)INT_MAX;
       }
       n--;
       count++;
     }
+#else
+    for( int i = 0; i < num && n > 0; i++ ) {
+      for( int k = 0; k < dim; k++ ) {
+	dest[i*dim + k] = lrand48()/(float)INT_MAX;
+      }
+      n--;
+      count++;
+    }
+#endif
     return count;
   }
   int ferror() {
@@ -1809,7 +1808,7 @@ public:
     for( int i = 0; i < num; i++ ) {
       for( int k = 0; k < dim; k++ ) {
       float ** newdest = (float **) dest;
-      std::fread(newdest[i*dim + k], sizeof(float), 1, fp);
+      std::fread(&newdest[i][k], sizeof(float), 1, fp);
       }
     }
 #else
@@ -1843,12 +1842,7 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
 
   for( int i = 0; i < centers->num; i++ ) {
     if( is_a_median[i] ) {
-#ifdef RELAYOUT_ALLOC
-      long ** newcenterIDs = (long **) centerIDs;
-      fprintf(fp, "%u\n", *newcenterIDs[i]);
-#else
       fprintf(fp, "%u\n", centerIDs[i]);
-#endif
       fprintf(fp, "%lf\n", centers->p[i].weight);
       for( int k = 0; k < centers->dim; k++ ) {
 	fprintf(fp, "%lf ", centers->p[i].coord[k]);
@@ -1861,21 +1855,21 @@ void outcenterIDs( Points* centers, long* centerIDs, char* outfile ) {
 
 #ifdef RELAYOUT_ALLOC
 // Malloc an array of pointers and the corresponding objects
-static void ** batch_alloc(int num, int item_size)
+static void ** allocate_array_of_arrays(int num_arrays, int array_size, int item_size)
 {
-  void ** batch = (void **) calloc(num, sizeof(void *));
-  if (batch == NULL) {
-    fprintf(stderr, "not enough memory for pointers array(len=%d)!\n", num);
+  void ** a_of_a = (void **) malloc(num_arrays * sizeof(void *));
+  if (a_of_a == NULL) {
+    fprintf(stderr, "not enough memory for pointers array(len=%d)!\n", num_arrays);
     exit(1);
   }
-  for (int i = 0; i < num; i++) {
-    batch[i] = malloc(item_size);
-    if (batch[i] == NULL) {
+  for (int i = 0; i < num_arrays; i++) {
+    a_of_a[i] = malloc(array_size * item_size);
+    if (a_of_a[i] == NULL) {
       fprintf(stderr, "not enough memory for allocating object(size=%d)!\n", item_size);
       exit(1);
     }
   }
-  return batch;
+  return a_of_a;
 }
 #endif
 
@@ -1885,9 +1879,9 @@ void streamCluster( PStream* stream,
 {
 
 #ifdef RELAYOUT_ALLOC
-  float** block = (float**)batch_alloc(chunksize*dim, sizeof(float));
-  float** centerBlock = (float**)batch_alloc(centersize*dim, sizeof(float));
-  long** centerIDs = (long**)batch_alloc(centersize*dim, sizeof(long));
+  float** block = (float**)allocate_array_of_arrays(chunksize, dim, sizeof(float));
+  float** centerBlock = (float**)allocate_array_of_arrays(centersize, dim, sizeof(float));
+  long* centerIDs = (long*)malloc(centersize*dim*sizeof(long));
 #else
 #ifdef TBB_VERSION
   float* block = (float*)memoryFloat.allocate( chunksize*dim*sizeof(float) );
@@ -1917,7 +1911,7 @@ void streamCluster( PStream* stream,
 
   for( int i = 0; i < chunksize; i++ ) {
 #ifdef RELAYOUT_ALLOC
-    points.p[i].coord = block[i*dim];
+    points.p[i].coord = block[i];
 #else
     points.p[i].coord = &block[i*dim];
 #endif
@@ -1935,7 +1929,7 @@ void streamCluster( PStream* stream,
 
   for( int i = 0; i< centersize; i++ ) {
 #ifdef RELAYOUT_ALLOC
-    centers.p[i].coord = centerBlock[i*dim];
+    centers.p[i].coord = centerBlock[i];
 #else
     centers.p[i].coord = &centerBlock[i*dim];
 #endif
@@ -1983,7 +1977,7 @@ void streamCluster( PStream* stream,
       exit(1);
     }
 
-    copycenters(&points, &centers, (long *)centerIDs, IDoffset); /* sequential */
+    copycenters(&points, &centers, centerIDs, IDoffset); /* sequential */
     IDoffset += numRead;
 
 #ifdef TBB_VERSION
@@ -2014,7 +2008,7 @@ void streamCluster( PStream* stream,
 
   localSearch( &centers, kmin, kmax ,&kfinal ); // parallel
   contcenters(&centers);
-  outcenterIDs( &centers, (long *)centerIDs, outfile);
+  outcenterIDs( &centers, centerIDs, outfile);
 }
 
 int main(int argc, char **argv)
@@ -2054,7 +2048,9 @@ int main(int argc, char **argv)
     exit(1);
   }
 
-
+#ifdef RELAYOUT_ALLOC
+  fprintf(stderr, "Enabled RELAYOUT_ALLOC\n");
+#endif
 
   kmin = atoi(argv[1]);
   kmax = atoi(argv[2]);

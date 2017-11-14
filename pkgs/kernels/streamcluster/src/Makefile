@@ -7,6 +7,10 @@ OBJS=parsec_barrier.o streamcluster.o
 CXX=g++
 CXXFLAGS :=	$(CXXFLAGS) -DENABLE_THREADS -pthread
 
+ifdef RELAYOUT_ALLOC
+	CXXFLAGS := $(CXXFLAGS) -DRELAYOUT_ALLOC
+endif
+
 ifdef version
   ifeq "$(version)" "pthreads"
     CXXFLAGS :=	$(CXXFLAGS) -DENABLE_THREADS -pthread
