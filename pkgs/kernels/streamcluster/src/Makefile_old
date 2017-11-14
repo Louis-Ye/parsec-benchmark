@@ -3,9 +3,7 @@
 PREFIX=${PARSECDIR}/pkgs/kernels/streamcluster/inst/${PARSECPLAT}
 
 TARGET=streamcluster
-OBJS=parsec_barrier.o streamcluster.o
-CXX=g++
-CXXFLAGS :=	$(CXXFLAGS) -DENABLE_THREADS -pthread
+OBJS=streamcluster.o
 
 ifdef version
   ifeq "$(version)" "pthreads"
